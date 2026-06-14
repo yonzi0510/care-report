@@ -118,10 +118,10 @@ document.getElementById('gateform').addEventListener('submit', async (e)=>{
   const btn = document.getElementById('enter');
   errEl.textContent=''; btn.disabled=true; btn.textContent='확인 중…';
   try{
-    manifest = (await fetchJSON('reports/manifest.json')).reports || [];
+    manifest = (await fetchJSON('manifest.json')).reports || [];
     if(!manifest.length){ throw {nodata:true}; }
     // 가장 최신 보고서로 코드 검증
-    const latest = await fetchJSON('reports/' + manifest[0].key + '.json');
+    const latest = await fetchJSON(manifest[0].key + '.json');
     await decryptPayload(latest, code);    // 틀리면 여기서 예외
     PASS = code;
     enterApp(latest, manifest[0].key);
@@ -148,7 +148,7 @@ async function loadSelected(){
   const rep = document.getElementById('report');
   rep.innerHTML = '<div class="muted">불러오는 중…</div>';
   try{
-    const payload = await fetchJSON('reports/' + key + '.json');
+    const payload = await fetchJSON(key + '.json');
     const html = await decryptPayload(payload, PASS);
     rep.innerHTML = html;
   }catch(ex){ rep.innerHTML = '<div class="muted">보고서를 불러오지 못했습니다.</div>'; }
