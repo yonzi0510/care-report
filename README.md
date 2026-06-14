@@ -1,1 +1,1 @@
-care-report
+care-report — 자동 업로드 연결 테스트 (2026-06-14)
