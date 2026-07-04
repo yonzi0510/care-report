@@ -165,6 +165,7 @@ function selectTab(tab){
   const items = fillPicker(tab);
   const rep = document.getElementById('report');
   if(!items.length){
+    _loadSeq++; // 비행 중인 이전 요청이 도착해 이 빈 메시지를 덮어쓰지 못하도록 무효화
     document.getElementById('picker').innerHTML='';
     rep.innerHTML='<div class="muted">해당 종류의 보고서가 아직 없습니다.</div>';
     return;
@@ -173,15 +174,22 @@ function selectTab(tab){
   loadSelected();
 }
 
+let _loadSeq = 0; // 빠른 탭/날짜 전환 시 늦게 도착한 이전 요청이 화면을 덮어쓰지 않도록 순서 토큰
 async function loadSelected(){
   const key = document.getElementById('picker').value;
   if(!key) return;
+  const seq = ++_loadSeq;
   const rep = document.getElementById('report');
   rep.innerHTML = '<div class="muted">불러오는 중…</div>';
   try{
     const payload = await fetchJSON(key + '.json');
-    rep.innerHTML = await decryptPayload(payload, PASS);
-  }catch(ex){ rep.innerHTML = '<div class="muted">보고서를 불러오지 못했습니다.</div>'; }
+    const html = await decryptPayload(payload, PASS);
+    if(seq !== _loadSeq) return;
+    rep.innerHTML = html;
+  }catch(ex){
+    if(seq !== _loadSeq) return;
+    rep.innerHTML = '<div class="muted">보고서를 불러오지 못했습니다.</div>';
+  }
 }
 
 document.getElementById('lock').addEventListener('click', ()=>{ location.reload(); });
