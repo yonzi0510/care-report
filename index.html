@@ -4,14 +4,6 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <meta name="robots" content="noindex, nofollow"/>
-<link rel="icon" type="image/svg+xml" href="favicon.svg"/>
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png"/>
-<link rel="apple-touch-icon" href="apple-touch-icon.png"/>
-<link rel="manifest" href="pwa-manifest.json"/>
-<meta name="theme-color" content="#1F3864"/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="특이사항 보고서"/>
 <title>특이사항 보고서</title>
 <style>
   :root{
@@ -39,6 +31,9 @@
   button#enter:active{opacity:.85;}
   button#enter:disabled{opacity:.5;cursor:default;}
   #err{color:var(--danger);font-size:12.5px;margin-top:12px;min-height:16px;}
+  #remember-wrap{display:flex;align-items:center;justify-content:center;gap:6px;
+    margin-top:13px;font-size:12.5px;color:var(--ink2);cursor:pointer;user-select:none;}
+  #remember-wrap input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;margin:0;}
   #app{display:none;}
   .topbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
   .topbar h1{font-size:16px;margin:0;font-weight:700;}
@@ -72,6 +67,7 @@
       <h1>삽교주간보호 특이사항 보고서</h1>
       <p>열람하려면 진입코드를 입력하세요</p>
       <input id="code" inputmode="text" autocomplete="off" autofocus placeholder="••••"/>
+      <label id="remember-wrap"><input type="checkbox" id="remember"/> 이 기기에서 자동 로그인</label>
       <button id="enter" type="submit">열기</button>
       <div id="err"></div>
     </form>
@@ -125,6 +121,18 @@ function kindOf(key){
   return 'day';
 }
 
+// 자동 로그인용 저장 키. 진입코드는 이 기기의 브라우저에만 저장됨(서버 전송 없음).
+const LS_KEY = 'careReportPass';
+
+// 진입코드 검증(틀리면 예외). manifest·PASS를 채운다.
+async function verifyCode(code){
+  manifest = (await fetchJSON('manifest.json')).reports || [];
+  if(!manifest.length){ throw {nodata:true}; }
+  const latest = await fetchJSON(manifest[0].key + '.json');
+  await decryptPayload(latest, code); // 코드가 틀리면 여기서 예외 발생
+  PASS = code;
+}
+
 document.getElementById('gateform').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const code = document.getElementById('code').value.trim();
@@ -132,11 +140,12 @@ document.getElementById('gateform').addEventListener('submit', async (e)=>{
   const btn = document.getElementById('enter');
   errEl.textContent=''; btn.disabled=true; btn.textContent='확인 중…';
   try{
-    manifest = (await fetchJSON('manifest.json')).reports || [];
-    if(!manifest.length){ throw {nodata:true}; }
-    const latest = await fetchJSON(manifest[0].key + '.json');
-    await decryptPayload(latest, code);
-    PASS = code;
+    await verifyCode(code);
+    // '자동 로그인' 체크 시 이 기기에 코드 저장, 아니면 기존 저장분 삭제
+    try{
+      if(document.getElementById('remember').checked){ localStorage.setItem(LS_KEY, code); }
+      else{ localStorage.removeItem(LS_KEY); }
+    }catch(_){}
     enterApp();
   }catch(ex){
     if(ex && ex.nodata){ errEl.textContent='아직 등록된 보고서가 없습니다.'; }
@@ -145,6 +154,22 @@ document.getElementById('gateform').addEventListener('submit', async (e)=>{
     document.getElementById('code').select();
   }
 });
+
+// 페이지를 열 때 저장된 코드가 있으면 조용히 자동 로그인 시도
+(async function tryAutoLogin(){
+  let saved=null;
+  try{ saved = localStorage.getItem(LS_KEY); }catch(_){}
+  if(!saved) return;
+  const cb = document.getElementById('remember');
+  if(cb) cb.checked = true;
+  try{
+    await verifyCode(saved);
+    enterApp();
+  }catch(_){
+    // 저장된 코드가 더는 유효하지 않으면 삭제하고 일반 입력 화면 유지
+    try{ localStorage.removeItem(LS_KEY); }catch(__){}
+  }
+})();
 
 function enterApp(){
   document.getElementById('gate').style.display='none';
@@ -173,7 +198,6 @@ function selectTab(tab){
   const items = fillPicker(tab);
   const rep = document.getElementById('report');
   if(!items.length){
-    _loadSeq++; // 비행 중인 이전 요청이 도착해 이 빈 메시지를 덮어쓰지 못하도록 무효화
     document.getElementById('picker').innerHTML='';
     rep.innerHTML='<div class="muted">해당 종류의 보고서가 아직 없습니다.</div>';
     return;
@@ -182,25 +206,22 @@ function selectTab(tab){
   loadSelected();
 }
 
-let _loadSeq = 0; // 빠른 탭/날짜 전환 시 늦게 도착한 이전 요청이 화면을 덮어쓰지 않도록 순서 토큰
 async function loadSelected(){
   const key = document.getElementById('picker').value;
   if(!key) return;
-  const seq = ++_loadSeq;
   const rep = document.getElementById('report');
   rep.innerHTML = '<div class="muted">불러오는 중…</div>';
   try{
     const payload = await fetchJSON(key + '.json');
-    const html = await decryptPayload(payload, PASS);
-    if(seq !== _loadSeq) return;
-    rep.innerHTML = html;
-  }catch(ex){
-    if(seq !== _loadSeq) return;
-    rep.innerHTML = '<div class="muted">보고서를 불러오지 못했습니다.</div>';
-  }
+    rep.innerHTML = await decryptPayload(payload, PASS);
+  }catch(ex){ rep.innerHTML = '<div class="muted">보고서를 불러오지 못했습니다.</div>'; }
 }
 
-document.getElementById('lock').addEventListener('click', ()=>{ location.reload(); });
+document.getElementById('lock').addEventListener('click', ()=>{
+  // 잠그기 = 자동 로그인 해제(저장 코드 삭제) 후 잠금
+  try{ localStorage.removeItem(LS_KEY); }catch(_){}
+  location.reload();
+});
 </script>
 </body>
 </html>
